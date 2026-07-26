@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import PaystackPop from "@paystack/inline-js";
 
 interface VIPSubscriptionButtonProps {
   email: string;
@@ -24,10 +23,12 @@ export default function VIPSubscriptionButton({
 }: VIPSubscriptionButtonProps) {
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const handlePayment = () => {
+  const handlePayment = async () => {
     if (isProcessing) return;
     setIsProcessing(true);
 
+    // Import dynamique : Paystack n'est chargé qu'au clic, jamais pendant le SSR
+    const PaystackPop = (await import("@paystack/inline-js")).default;
     const paystack = new PaystackPop();
 
     paystack.newTransaction({
