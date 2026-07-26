@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import type { Profile } from '@/lib/types/profile';
+import PaystackPop from '@paystack/inline-js';
 
 type Tab = 'discover' | 'likes' | 'messages' | 'profile';
 
@@ -219,27 +220,49 @@ export default function DashboardPage() {
     router.replace('/');
   }
 
-  // ---------- VIP Checkout Simulation ----------
+  // ---------- Real VIP Checkout with Paystack ----------
   function handleVipCheckout() {
     if (vipCheckoutState !== 'idle') return;
     
     // Step 1: processing state (loading on button)
     setVipCheckoutState('processing');
 
-    setTimeout(() => {
-      // Step 2: success screen
-      setVipCheckoutState('success');
+    const paystack = new PaystackPop();
+    paystack.newTransaction({
+      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY as string,
+      email: currentUser?.email || 'user@example.com',
+      amount: 4900 * 100, // 4900 XOF en centimes/kobo
+      metadata: {
+        custom_fields: [
+          {
+            display_name: "Plan Type",
+            variable_name: "plan_type",
+            value: "VIP Subscription",
+          },
+        ],
+      },
+      onSuccess: (transaction: any) => {
+        // Step 2: success screen
+        setVipCheckoutState('success');
 
-      setTimeout(() => {
-        // Step 3: activate VIP + close modal + celebration effect
-        setIsVip(true);
-        setShowVipModal(false);
-        setVipCheckoutState('idle'); // reset for next time
-        
-        setShowCelebration(true);
-        setTimeout(() => setShowCelebration(false), 5000);
-      }, 3000);
-    }, 1500);
+        setTimeout(() => {
+          // Step 3: activate VIP + close modal + celebration effect
+          setIsVip(true);
+          setShowVipModal(false);
+          setVipCheckoutState('idle'); // reset for next time
+          
+          setShowCelebration(true);
+          setTimeout(() => setShowCelebration(false), 5000);
+        }, 3000);
+      },
+      onCancel: () => {
+        setVipCheckoutState('idle');
+      },
+      onError: (error: any) => {
+        setVipCheckoutState('idle');
+        console.error("Paystack error:", error);
+      },
+    });
   }
 
   // ---------- Real DB Like Action (with Premium check) ----------
