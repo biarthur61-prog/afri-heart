@@ -5,17 +5,29 @@ import PaystackPop from "@paystack/inline-js";
 
 interface VIPSubscriptionButtonProps {
   email: string;
-  amount?: number; // Montant en monnaie locale (ex: 5000 pour 5000 FCFA/NGN)
+  amount?: number; // Montant en monnaie locale (ex: 4900 pour 4900 XOF)
+  onSuccess?: (transaction: any) => void;
+  onCancel?: () => void;
+  className?: string;
+  style?: React.CSSProperties;
+  children?: React.ReactNode;
 }
 
 export default function VIPSubscriptionButton({
   email,
-  amount = 5000,
+  amount = 4900,
+  onSuccess,
+  onCancel,
+  className,
+  style,
+  children,
 }: VIPSubscriptionButtonProps) {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const handlePayment = () => {
+    if (isProcessing) return;
     setIsProcessing(true);
+
     const paystack = new PaystackPop();
 
     paystack.newTransaction({
@@ -33,25 +45,46 @@ export default function VIPSubscriptionButton({
       },
       onSuccess: (transaction: any) => {
         setIsProcessing(false);
-        // Le paiement a réussi côté client. 
-        // Le Webhook se chargera de mettre à jour la base de données.
-        alert(`Paiement réussi ! Référence: ${transaction.reference}`);
-        
-        // Optionnel : Vous pouvez aussi appeler une route API pour vérifier immédiatement
-        // fetch(`/api/paystack/verify?reference=${transaction.reference}`);
+        // Déléguer la logique post-paiement au parent via le callback
+        if (onSuccess) onSuccess(transaction);
       },
       onCancel: () => {
         setIsProcessing(false);
+        if (onCancel) onCancel();
         console.log("Paiement annulé par l'utilisateur.");
       },
       onError: (error: any) => {
         setIsProcessing(false);
         console.error("Erreur de paiement Paystack :", error);
-        alert("Une erreur est survenue lors du paiement.");
       },
     });
   };
 
+  // Si children ou className personnalisé, rendre un bouton flexible
+  if (children || className) {
+    return (
+      <button
+        onClick={handlePayment}
+        disabled={isProcessing}
+        className={className}
+        style={style}
+      >
+        {isProcessing ? (
+          <span className="flex items-center justify-center gap-2 opacity-70">
+            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Traitement...
+          </span>
+        ) : (
+          children
+        )}
+      </button>
+    );
+  }
+
+  // Bouton VIP par défaut (standalone)
   return (
     <button
       onClick={handlePayment}

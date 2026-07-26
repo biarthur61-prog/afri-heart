@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import type { Profile } from '@/lib/types/profile';
-import PaystackPop from '@paystack/inline-js';
+import VIPSubscriptionButton from '@/app/components/VIPSubscriptionButton';
 
 type Tab = 'discover' | 'likes' | 'messages' | 'profile';
 
@@ -74,8 +74,15 @@ export default function DashboardPage() {
   const [showVipModal, setShowVipModal] = useState(false);
   const [vipModalSource, setVipModalSource] = useState<'likes_limit' | 'received_likes' | 'sidebar' | 'messages_limit'>('likes_limit');
   const [isVip, setIsVip] = useState(false);
-  const [vipCheckoutState, setVipCheckoutState] = useState<'idle' | 'processing' | 'success'>('idle');
   const [showCelebration, setShowCelebration] = useState(false);
+
+  // Callback appelé UNIQUEMENT après succès réel du paiement Paystack
+  const handleVipSuccess = () => {
+    setIsVip(true);
+    setShowVipModal(false);
+    setShowCelebration(true);
+    setTimeout(() => setShowCelebration(false), 5000);
+  };
 
   // Chat tracking state
   const [sentMessagesCount, setSentMessagesCount] = useState(0);
@@ -220,37 +227,7 @@ export default function DashboardPage() {
     router.replace('/');
   }
 
-  // ---------- Real VIP Checkout with Paystack ----------
-  function handleVipCheckout() {
-    const paystack = new PaystackPop();
-    paystack.newTransaction({
-      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY as string,
-      email: currentUser?.email || 'user@example.com',
-      amount: 4900 * 100, // 4900 XOF en centimes/kobo
-      metadata: {
-        custom_fields: [
-          {
-            display_name: "Plan Type",
-            variable_name: "plan_type",
-            value: "VIP Subscription",
-          },
-        ],
-      },
-      onSuccess: (transaction: any) => {
-        // Activer le mode VIP immédiatement en frontend après le succès
-        setIsVip(true);
-        setShowVipModal(false);
-        setShowCelebration(true);
-        setTimeout(() => setShowCelebration(false), 5000);
-      },
-      onCancel: () => {
-        console.log("Paiement annulé par l'utilisateur.");
-      },
-      onError: (error: any) => {
-        console.error("Paystack error:", error);
-      },
-    });
-  }
+
 
   // ---------- Real DB Like Action (with Premium check) ----------
   const handleLike = async (profileId: string) => {
@@ -1299,11 +1276,7 @@ export default function DashboardPage() {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in"
           onClick={(e) => {
-            // Prevent closing during payment flow
-            if (vipCheckoutState === 'idle' && e.target === e.currentTarget) {
-              setShowVipModal(false);
-              setVipCheckoutState('idle');
-            }
+            if (e.target === e.currentTarget) setShowVipModal(false);
           }}
         >
           {/* Modal card */}
@@ -1321,20 +1294,18 @@ export default function DashboardPage() {
             <div className="pointer-events-none absolute -top-20 -right-20 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl" />
             <div className="pointer-events-none absolute -bottom-20 -left-20 w-56 h-56 bg-rose-500/10 rounded-full blur-3xl" />
 
-            {/* Close button — hidden during processing/success */}
-            {vipCheckoutState === 'idle' && (
-              <button
-                onClick={() => { setShowVipModal(false); setVipCheckoutState('idle'); }}
-                className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-all cursor-pointer text-sm"
-                aria-label="Fermer"
-              >
-                ✕
-              </button>
-            )}
+            {/* Close button */}
+            <button
+              onClick={() => setShowVipModal(false)}
+              className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-all cursor-pointer text-sm"
+              aria-label="Fermer"
+            >
+              ✕
+            </button>
 
-            {/* ── STATE: SUCCESS ── */}
-            {vipCheckoutState === 'success' && (
-              <div className="p-10 flex flex-col items-center justify-center gap-5 min-h-[320px] text-center">
+            {/* ── SUPPRIMÉ : Plus d'écran de succès local — c'est onSuccess de Paystack qui gère ── */}
+            {false && (
+              <div>
                 {/* Animated checkmark circle */}
                 <div
                   className="w-24 h-24 rounded-full flex items-center justify-center text-5xl shadow-2xl"
@@ -1382,8 +1353,8 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* ── STATE: IDLE or PROCESSING (normal view) ── */}
-            {(vipCheckoutState === 'idle' || vipCheckoutState === 'processing') && (
+            {/* ── Vue principale de la modale ── */}
+            {(
               <div className="p-8 space-y-6">
                 {/* Crown + heading */}
                 <div className="text-center space-y-3">
@@ -1435,21 +1406,23 @@ export default function DashboardPage() {
                 {/* Pricing plans */}
                 <div className="grid grid-cols-2 gap-3">
                   {/* Monthly */}
-                  <button
-                    onClick={handleVipCheckout}
-                    disabled={vipCheckoutState !== 'idle'}
-                    className="relative flex flex-col items-center gap-1 p-4 rounded-2xl border border-white/10 hover:border-amber-500/40 bg-white/[0.03] hover:bg-amber-500/5 transition-all cursor-pointer group disabled:opacity-50 disabled:cursor-not-allowed"
+                  <VIPSubscriptionButton
+                    email={currentUser?.email || ''}
+                    amount={4900}
+                    onSuccess={handleVipSuccess}
+                    className="relative flex flex-col items-center gap-1 p-4 rounded-2xl border border-white/10 hover:border-amber-500/40 bg-white/[0.03] hover:bg-amber-500/5 transition-all cursor-pointer group w-full"
                   >
                     <span className="text-xs font-semibold text-zinc-400 group-hover:text-zinc-300">1 mois</span>
                     <span className="text-xl font-black text-white">4 900</span>
                     <span className="text-[10px] text-zinc-500">XOF / mois</span>
-                  </button>
+                  </VIPSubscriptionButton>
 
                   {/* Annual — highlighted */}
-                  <button
-                    onClick={handleVipCheckout}
-                    disabled={vipCheckoutState !== 'idle'}
-                    className="relative flex flex-col items-center gap-1 p-4 rounded-2xl border transition-all cursor-pointer group overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
+                  <VIPSubscriptionButton
+                    email={currentUser?.email || ''}
+                    amount={29900}
+                    onSuccess={handleVipSuccess}
+                    className="relative flex flex-col items-center gap-1 p-4 rounded-2xl border transition-all cursor-pointer group overflow-hidden w-full"
                     style={{
                       background: 'linear-gradient(135deg, rgba(251,191,36,0.12), rgba(244,63,94,0.10))',
                       border: '1px solid rgba(251,191,36,0.35)',
@@ -1471,37 +1444,27 @@ export default function DashboardPage() {
                     >
                       Économisez 50%
                     </span>
-                  </button>
+                  </VIPSubscriptionButton>
                 </div>
 
                 {/* Primary CTA */}
-                <button
-                  onClick={handleVipCheckout}
-                  disabled={vipCheckoutState !== 'idle'}
-                  className="w-full py-4 rounded-2xl font-black text-base text-zinc-950 tracking-wide transition-all active:scale-95 cursor-pointer disabled:opacity-90 disabled:cursor-wait relative overflow-hidden"
+                <VIPSubscriptionButton
+                  email={currentUser?.email || ''}
+                  amount={4900}
+                  onSuccess={handleVipSuccess}
+                  className="w-full py-4 rounded-2xl font-black text-base text-zinc-950 tracking-wide transition-all active:scale-95 cursor-pointer relative overflow-hidden"
                   style={{
                     background: 'linear-gradient(90deg, #f59e0b, #f97316, #e11d48)',
                     boxShadow: '0 8px 32px rgba(251,191,36,0.35)'
                   }}
                 >
-                  {vipCheckoutState === 'processing' ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="animate-spin h-5 w-5 text-zinc-950" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Traitement sécurisé...
-                    </span>
-                  ) : (
-                    'Passer VIP maintenant 👑'
-                  )}
-                </button>
+                  Passer VIP maintenant 👑
+                </VIPSubscriptionButton>
 
                 {/* Dismiss */}
                 <button
-                  onClick={() => { setShowVipModal(false); setVipCheckoutState('idle'); }}
-                  disabled={vipCheckoutState !== 'idle'}
-                  className="w-full py-2.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => setShowVipModal(false)}
+                  className="w-full py-2.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
                 >
                   Plus tard, je reste en version gratuite
                 </button>
