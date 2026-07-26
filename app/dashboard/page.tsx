@@ -222,11 +222,6 @@ export default function DashboardPage() {
 
   // ---------- Real VIP Checkout with Paystack ----------
   function handleVipCheckout() {
-    if (vipCheckoutState !== 'idle') return;
-    
-    // Step 1: processing state (loading on button)
-    setVipCheckoutState('processing');
-
     const paystack = new PaystackPop();
     paystack.newTransaction({
       key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY as string,
@@ -242,24 +237,16 @@ export default function DashboardPage() {
         ],
       },
       onSuccess: (transaction: any) => {
-        // Step 2: success screen
-        setVipCheckoutState('success');
-
-        setTimeout(() => {
-          // Step 3: activate VIP + close modal + celebration effect
-          setIsVip(true);
-          setShowVipModal(false);
-          setVipCheckoutState('idle'); // reset for next time
-          
-          setShowCelebration(true);
-          setTimeout(() => setShowCelebration(false), 5000);
-        }, 3000);
+        // Activer le mode VIP immédiatement en frontend après le succès
+        setIsVip(true);
+        setShowVipModal(false);
+        setShowCelebration(true);
+        setTimeout(() => setShowCelebration(false), 5000);
       },
       onCancel: () => {
-        setVipCheckoutState('idle');
+        console.log("Paiement annulé par l'utilisateur.");
       },
       onError: (error: any) => {
-        setVipCheckoutState('idle');
         console.error("Paystack error:", error);
       },
     });
