@@ -1455,7 +1455,7 @@ export default function DashboardPage() {
                       <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-5 text-center space-y-2">
                         <span className="text-2xl">⏳</span>
                         <p className="text-sm font-bold text-amber-400">Document en cours de vérification</p>
-                        <p className="text-xs text-zinc-400">Notre équipe examine votre document. La vérification prend généralement entre quelques minutes et quelques heures.</p>
+                        <p className="text-xs text-zinc-400">Notre équipe examine vos documents. Votre profil sera vérifié dans un délai maximum de 2h à 12h (généralement en moins de 30 minutes pendant les heures ouvrables).</p>
                       </div>
                     ) : currentProfile?.id_document_status === 'rejected' ? (
                       <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4 flex items-start gap-3">
