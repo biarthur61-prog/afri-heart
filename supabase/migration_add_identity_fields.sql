@@ -13,9 +13,12 @@ ALTER TABLE profiles
 ALTER TABLE profiles
   ADD COLUMN IF NOT EXISTS age INTEGER;
 
--- 3. Ajouter l'URL de la pièce d'identité uploadée
+-- 3. Ajouter l'URL de la pièce d'identité uploadée (Recto et Verso)
 ALTER TABLE profiles
-  ADD COLUMN IF NOT EXISTS id_document_url TEXT;
+  ADD COLUMN IF NOT EXISTS id_document_recto_url TEXT;
+
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS id_document_verso_url TEXT;
 
 -- 4. Ajouter le statut de vérification de la pièce d'identité
 --    Valeurs : 'none' | 'pending' | 'verified' | 'rejected'
@@ -59,7 +62,7 @@ ALTER TABLE profiles
 -- ============================================================
 -- 7. Mettre à jour is_verified = false pour tous les profils existants
 --    (au cas où des anciens enregistrements auraient is_verified = true sans CNI)
--- UPDATE profiles SET is_verified = false WHERE id_document_url IS NULL;
+-- UPDATE profiles SET is_verified = false WHERE id_document_recto_url IS NULL OR id_document_verso_url IS NULL;
 -- ============================================================
 
 -- ✅ Migration terminée !

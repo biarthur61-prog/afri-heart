@@ -16,7 +16,8 @@ export interface Profile {
   objective?: string;
   search_age_range?: string;
   search_location?: string;
-  id_document_url?: string;       // URL Supabase Storage de la pièce d'identité uploadée
+  id_document_recto_url?: string;       // URL Supabase Storage du Recto
+  id_document_verso_url?: string;       // URL Supabase Storage du Verso
   id_document_status?: 'none' | 'pending' | 'verified' | 'rejected'; // Statut vérification
 }
 
@@ -28,4 +29,4 @@ export type ProfileInsert = Pick<Profile, 'id' | 'full_name' | 'phone_number' | 
 };
 
 // Type pour la mise à jour d'un profil (tous les champs modifiables sont optionnels)
-export type ProfileUpdate = Partial<Pick<Profile, 'full_name' | 'phone_number' | 'city' | 'bio' | 'age' | 'date_of_birth' | 'profession' | 'objective' | 'search_age_range' | 'search_location' | 'id_document_url' | 'id_document_status'>>;
+export type ProfileUpdate = Partial<Pick<Profile, 'full_name' | 'phone_number' | 'city' | 'bio' | 'age' | 'date_of_birth' | 'profession' | 'objective' | 'search_age_range' | 'search_location' | 'id_document_recto_url' | 'id_document_verso_url' | 'id_document_status'>>;

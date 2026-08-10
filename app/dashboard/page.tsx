@@ -84,9 +84,11 @@ export default function DashboardPage() {
     setTimeout(() => setShowCelebration(false), 5000);
   };
 
-  // Identité — upload CNI/Passeport
-  const [idDocFile, setIdDocFile] = useState<File | null>(null);
-  const [idDocPreview, setIdDocPreview] = useState<string | null>(null);
+  // Identité — upload CNI/Passeport (Recto/Verso)
+  const [idDocRectoFile, setIdDocRectoFile] = useState<File | null>(null);
+  const [idDocRectoPreview, setIdDocRectoPreview] = useState<string | null>(null);
+  const [idDocVersoFile, setIdDocVersoFile] = useState<File | null>(null);
+  const [idDocVersoPreview, setIdDocVersoPreview] = useState<string | null>(null);
   const [idDocUploading, setIdDocUploading] = useState(false);
   const [idDocError, setIdDocError] = useState('');
   const [idDocSuccess, setIdDocSuccess] = useState(false);
@@ -429,30 +431,43 @@ export default function DashboardPage() {
 
   // ---------- Upload pièce d'identité (CNI / Passeport) ----------
   const handleIdDocumentUpload = async () => {
-    if (!idDocFile || !currentUser) return;
+    if (!idDocRectoFile || !idDocVersoFile || !currentUser) return;
 
     setIdDocUploading(true);
     setIdDocError('');
     setIdDocSuccess(false);
 
     try {
-      const fileExt = idDocFile.name.split('.').pop();
-      const filePath = `${currentUser.id}/identity.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
+      // 1. Upload Recto
+      const rectoExt = idDocRectoFile.name.split('.').pop();
+      const rectoFilePath = `${currentUser.id}/identity_recto.${rectoExt}`;
+      const { error: uploadRectoError } = await supabase.storage
         .from('identity-docs')
-        .upload(filePath, idDocFile, { upsert: true });
+        .upload(rectoFilePath, idDocRectoFile, { upsert: true });
+      if (uploadRectoError) throw uploadRectoError;
 
-      if (uploadError) throw uploadError;
-
-      const { data: urlData } = supabase.storage
+      // 2. Upload Verso
+      const versoExt = idDocVersoFile.name.split('.').pop();
+      const versoFilePath = `${currentUser.id}/identity_verso.${versoExt}`;
+      const { error: uploadVersoError } = await supabase.storage
         .from('identity-docs')
-        .getPublicUrl(filePath);
+        .upload(versoFilePath, idDocVersoFile, { upsert: true });
+      if (uploadVersoError) throw uploadVersoError;
 
+      // 3. Obtenir les URLs publiques
+      const { data: rectoUrlData } = supabase.storage
+        .from('identity-docs')
+        .getPublicUrl(rectoFilePath);
+      const { data: versoUrlData } = supabase.storage
+        .from('identity-docs')
+        .getPublicUrl(versoFilePath);
+
+      // 4. Mettre à jour la base de données
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
-          id_document_url: urlData.publicUrl,
+          id_document_recto_url: rectoUrlData.publicUrl,
+          id_document_verso_url: versoUrlData.publicUrl,
           id_document_status: 'pending',
         })
         .eq('id', currentUser.id);
@@ -460,11 +475,13 @@ export default function DashboardPage() {
       if (updateError) throw updateError;
 
       setCurrentProfile((prev) =>
-        prev ? { ...prev, id_document_url: urlData.publicUrl, id_document_status: 'pending' } : null
+        prev ? { ...prev, id_document_recto_url: rectoUrlData.publicUrl, id_document_verso_url: versoUrlData.publicUrl, id_document_status: 'pending' } : null
       );
       setIdDocSuccess(true);
-      setIdDocFile(null);
-      setIdDocPreview(null);
+      setIdDocRectoFile(null);
+      setIdDocRectoPreview(null);
+      setIdDocVersoFile(null);
+      setIdDocVersoPreview(null);
     } catch (err: any) {
       console.error('Erreur upload CNI:', err);
       setIdDocError(
@@ -1431,55 +1448,108 @@ export default function DashboardPage() {
                     {/* Zone d'upload */}
                     {currentProfile?.id_document_status !== 'pending' && (
                       <div className="space-y-3">
-                        <label className="text-xs font-semibold text-zinc-400">
-                          {currentProfile?.id_document_status === 'rejected' ? 'Nouveau document' : 'CNI ou Passeport'}{' '}
-                          <span className="text-amber-500">*</span>
-                        </label>
+                        <div className="flex flex-col md:flex-row gap-3 items-end md:items-center">
+                          <label className="text-xs font-semibold text-zinc-400">
+                            {currentProfile?.id_document_status === 'rejected' ? 'Nouveaux documents' : 'CNI ou Passeport'}{' '}
+                            <span className="text-amber-500">*</span>
+                          </label>
+                          <span className="text-[10px] text-zinc-500 italic">
+                            (Si vous utilisez un Passeport, vous pouvez uploader la même photo pour le Recto et le Verso)
+                          </span>
+                        </div>
 
-                        {/* Drop zone */}
-                        <label
-                          htmlFor="idDocInput"
-                          className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-8 cursor-pointer transition-all duration-300
-                            ${idDocPreview ? 'border-amber-500/40 bg-amber-500/5' : 'border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]'}`}
-                        >
-                          {idDocPreview ? (
-                            <div className="space-y-3 w-full text-center">
-                              <img src={idDocPreview} alt="Aperçu CNI" className="mx-auto max-h-40 rounded-xl object-cover border border-white/10" />
-                              <p className="text-xs text-zinc-400">{idDocFile?.name}</p>
-                              <p className="text-[11px] text-amber-400">Cliquez pour changer le fichier</p>
-                            </div>
-                          ) : (
-                            <>
-                              <span className="text-4xl">🪪</span>
-                              <div className="text-center">
-                                <p className="text-sm font-medium text-zinc-300">Glissez votre document ici</p>
-                                <p className="text-xs text-zinc-500 mt-1">ou cliquez pour sélectionner</p>
+                        {/* Drop zones Recto/Verso */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {/* ─── RECTO ─── */}
+                          <label
+                            htmlFor="idDocRectoInput"
+                            className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-6 cursor-pointer transition-all duration-300
+                              ${idDocRectoPreview ? 'border-amber-500/40 bg-amber-500/5' : 'border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]'}`}
+                          >
+                            {idDocRectoPreview ? (
+                              <div className="space-y-3 w-full text-center">
+                                <img src={idDocRectoPreview} alt="Aperçu Recto" className="mx-auto max-h-32 rounded-xl object-cover border border-white/10" />
+                                <p className="text-xs text-zinc-400 truncate px-2">{idDocRectoFile?.name}</p>
+                                <p className="text-[11px] text-amber-400">Cliquez pour modifier</p>
                               </div>
-                              <p className="text-[11px] text-zinc-600">JPG, PNG ou PDF · Max 5 Mo</p>
-                            </>
-                          )}
-                          <input
-                            id="idDocInput"
-                            type="file"
-                            accept="image/jpeg,image/png,image/webp,application/pdf"
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                setIdDocFile(file);
-                                setIdDocError('');
-                                setIdDocSuccess(false);
-                                if (file.type.startsWith('image/')) {
-                                  const reader = new FileReader();
-                                  reader.onload = (ev) => setIdDocPreview(ev.target?.result as string);
-                                  reader.readAsDataURL(file);
-                                } else {
-                                  setIdDocPreview(null);
+                            ) : (
+                              <>
+                                <span className="text-3xl">🖼️</span>
+                                <div className="text-center">
+                                  <p className="text-sm font-medium text-zinc-300">Recto (Face avant)</p>
+                                  <p className="text-xs text-zinc-500 mt-1">Glissez ou cliquez</p>
+                                </div>
+                                <p className="text-[10px] text-zinc-600">JPG, PNG · Max 5 Mo</p>
+                              </>
+                            )}
+                            <input
+                              id="idDocRectoInput"
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp,application/pdf"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  setIdDocRectoFile(file);
+                                  setIdDocError('');
+                                  setIdDocSuccess(false);
+                                  if (file.type.startsWith('image/')) {
+                                    const reader = new FileReader();
+                                    reader.onload = (ev) => setIdDocRectoPreview(ev.target?.result as string);
+                                    reader.readAsDataURL(file);
+                                  } else {
+                                    setIdDocRectoPreview(null);
+                                  }
                                 }
-                              }
-                            }}
-                          />
-                        </label>
+                              }}
+                            />
+                          </label>
+
+                          {/* ─── VERSO ─── */}
+                          <label
+                            htmlFor="idDocVersoInput"
+                            className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-6 cursor-pointer transition-all duration-300
+                              ${idDocVersoPreview ? 'border-amber-500/40 bg-amber-500/5' : 'border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]'}`}
+                          >
+                            {idDocVersoPreview ? (
+                              <div className="space-y-3 w-full text-center">
+                                <img src={idDocVersoPreview} alt="Aperçu Verso" className="mx-auto max-h-32 rounded-xl object-cover border border-white/10" />
+                                <p className="text-xs text-zinc-400 truncate px-2">{idDocVersoFile?.name}</p>
+                                <p className="text-[11px] text-amber-400">Cliquez pour modifier</p>
+                              </div>
+                            ) : (
+                              <>
+                                <span className="text-3xl">🔄</span>
+                                <div className="text-center">
+                                  <p className="text-sm font-medium text-zinc-300">Verso (Face arrière)</p>
+                                  <p className="text-xs text-zinc-500 mt-1">Glissez ou cliquez</p>
+                                </div>
+                                <p className="text-[10px] text-zinc-600">JPG, PNG · Max 5 Mo</p>
+                              </>
+                            )}
+                            <input
+                              id="idDocVersoInput"
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp,application/pdf"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  setIdDocVersoFile(file);
+                                  setIdDocError('');
+                                  setIdDocSuccess(false);
+                                  if (file.type.startsWith('image/')) {
+                                    const reader = new FileReader();
+                                    reader.onload = (ev) => setIdDocVersoPreview(ev.target?.result as string);
+                                    reader.readAsDataURL(file);
+                                  } else {
+                                    setIdDocVersoPreview(null);
+                                  }
+                                }
+                              }}
+                            />
+                          </label>
+                        </div>
 
                         {/* Feedback */}
                         {idDocError && (
@@ -1499,7 +1569,7 @@ export default function DashboardPage() {
                         <button
                           type="button"
                           onClick={handleIdDocumentUpload}
-                          disabled={!idDocFile || idDocUploading}
+                          disabled={!idDocRectoFile || !idDocVersoFile || idDocUploading}
                           className="w-full py-3 rounded-xl font-bold text-sm text-white shadow-lg transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                           style={{ background: 'linear-gradient(90deg, #2563eb, #4f46e5)', boxShadow: '0 8px 24px rgba(37,99,235,0.25)' }}
                         >
