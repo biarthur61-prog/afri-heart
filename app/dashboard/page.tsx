@@ -84,11 +84,13 @@ export default function DashboardPage() {
     setTimeout(() => setShowCelebration(false), 5000);
   };
 
-  // Identité — upload CNI/Passeport (Recto/Verso)
+  // Identité — upload CNI/Passeport (Recto/Verso/Selfie)
   const [idDocRectoFile, setIdDocRectoFile] = useState<File | null>(null);
   const [idDocRectoPreview, setIdDocRectoPreview] = useState<string | null>(null);
   const [idDocVersoFile, setIdDocVersoFile] = useState<File | null>(null);
   const [idDocVersoPreview, setIdDocVersoPreview] = useState<string | null>(null);
+  const [idDocSelfieFile, setIdDocSelfieFile] = useState<File | null>(null);
+  const [idDocSelfiePreview, setIdDocSelfiePreview] = useState<string | null>(null);
   const [idDocUploading, setIdDocUploading] = useState(false);
   const [idDocError, setIdDocError] = useState('');
   const [idDocSuccess, setIdDocSuccess] = useState(false);
@@ -429,9 +431,9 @@ export default function DashboardPage() {
     }
   };
 
-  // ---------- Upload pièce d'identité (CNI / Passeport) ----------
+  // ---------- Upload pièce d'identité (CNI / Passeport / Selfie) ----------
   const handleIdDocumentUpload = async () => {
-    if (!idDocRectoFile || !idDocVersoFile || !currentUser) return;
+    if (!idDocRectoFile || !idDocVersoFile || !idDocSelfieFile || !currentUser) return;
 
     setIdDocUploading(true);
     setIdDocError('');
@@ -454,20 +456,32 @@ export default function DashboardPage() {
         .upload(versoFilePath, idDocVersoFile, { upsert: true });
       if (uploadVersoError) throw uploadVersoError;
 
-      // 3. Obtenir les URLs publiques
+      // 3. Upload Selfie
+      const selfieExt = idDocSelfieFile.name.split('.').pop();
+      const selfieFilePath = `${currentUser.id}/identity_selfie.${selfieExt}`;
+      const { error: uploadSelfieError } = await supabase.storage
+        .from('identity-docs')
+        .upload(selfieFilePath, idDocSelfieFile, { upsert: true });
+      if (uploadSelfieError) throw uploadSelfieError;
+
+      // 4. Obtenir les URLs publiques
       const { data: rectoUrlData } = supabase.storage
         .from('identity-docs')
         .getPublicUrl(rectoFilePath);
       const { data: versoUrlData } = supabase.storage
         .from('identity-docs')
         .getPublicUrl(versoFilePath);
+      const { data: selfieUrlData } = supabase.storage
+        .from('identity-docs')
+        .getPublicUrl(selfieFilePath);
 
-      // 4. Mettre à jour la base de données
+      // 5. Mettre à jour la base de données
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
           id_document_recto_url: rectoUrlData.publicUrl,
           id_document_verso_url: versoUrlData.publicUrl,
+          id_document_selfie_url: selfieUrlData.publicUrl,
           id_document_status: 'pending',
         })
         .eq('id', currentUser.id);
@@ -475,15 +489,23 @@ export default function DashboardPage() {
       if (updateError) throw updateError;
 
       setCurrentProfile((prev) =>
-        prev ? { ...prev, id_document_recto_url: rectoUrlData.publicUrl, id_document_verso_url: versoUrlData.publicUrl, id_document_status: 'pending' } : null
+        prev ? {
+          ...prev,
+          id_document_recto_url: rectoUrlData.publicUrl,
+          id_document_verso_url: versoUrlData.publicUrl,
+          id_document_selfie_url: selfieUrlData.publicUrl,
+          id_document_status: 'pending'
+        } : null
       );
       setIdDocSuccess(true);
       setIdDocRectoFile(null);
       setIdDocRectoPreview(null);
       setIdDocVersoFile(null);
       setIdDocVersoPreview(null);
+      setIdDocSelfieFile(null);
+      setIdDocSelfiePreview(null);
     } catch (err: any) {
-      console.error('Erreur upload CNI:', err);
+      console.error('Erreur upload identité:', err);
       setIdDocError(
         err.message ||
           "Erreur lors de l'upload. Vérifiez que le bucket 'identity-docs' existe dans Supabase Storage."
@@ -1458,8 +1480,8 @@ export default function DashboardPage() {
                           </span>
                         </div>
 
-                        {/* Drop zones Recto/Verso */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Drop zones Recto/Verso/Selfie */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                           {/* ─── RECTO ─── */}
                           <label
                             htmlFor="idDocRectoInput"
@@ -1549,6 +1571,50 @@ export default function DashboardPage() {
                               }}
                             />
                           </label>
+                          {/* ─── SELFIE ─── */}
+                          <label
+                            htmlFor="idDocSelfieInput"
+                            className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-6 cursor-pointer transition-all duration-300
+                              ${idDocSelfiePreview ? 'border-amber-500/40 bg-amber-500/5' : 'border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]'}`}
+                          >
+                            {idDocSelfiePreview ? (
+                              <div className="space-y-3 w-full text-center">
+                                <img src={idDocSelfiePreview} alt="Aperçu Selfie" className="mx-auto max-h-32 rounded-xl object-cover border border-white/10" />
+                                <p className="text-xs text-zinc-400 truncate px-2">{idDocSelfieFile?.name}</p>
+                                <p className="text-[11px] text-amber-400">Cliquez pour modifier</p>
+                              </div>
+                            ) : (
+                              <>
+                                <span className="text-3xl">🤳</span>
+                                <div className="text-center">
+                                  <p className="text-sm font-medium text-zinc-300">Selfie visage</p>
+                                  <p className="text-xs text-zinc-500 mt-1">Glissez ou cliquez</p>
+                                </div>
+                                <p className="text-[10px] text-zinc-600">JPG, PNG · Max 5 Mo</p>
+                              </>
+                            )}
+                            <input
+                              id="idDocSelfieInput"
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp,application/pdf"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  setIdDocSelfieFile(file);
+                                  setIdDocError('');
+                                  setIdDocSuccess(false);
+                                  if (file.type.startsWith('image/')) {
+                                    const reader = new FileReader();
+                                    reader.onload = (ev) => setIdDocSelfiePreview(ev.target?.result as string);
+                                    reader.readAsDataURL(file);
+                                  } else {
+                                    setIdDocSelfiePreview(null);
+                                  }
+                                }
+                              }}
+                            />
+                          </label>
                         </div>
 
                         {/* Feedback */}
@@ -1569,7 +1635,7 @@ export default function DashboardPage() {
                         <button
                           type="button"
                           onClick={handleIdDocumentUpload}
-                          disabled={!idDocRectoFile || !idDocVersoFile || idDocUploading}
+                          disabled={!idDocRectoFile || !idDocVersoFile || !idDocSelfieFile || idDocUploading}
                           className="w-full py-3 rounded-xl font-bold text-sm text-white shadow-lg transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                           style={{ background: 'linear-gradient(90deg, #2563eb, #4f46e5)', boxShadow: '0 8px 24px rgba(37,99,235,0.25)' }}
                         >

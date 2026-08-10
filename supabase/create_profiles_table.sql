@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   -- ── Contrainte 2 : Pièce d'identité / CNI ──────────────────────────────
   id_document_recto_url     TEXT,                     -- URL Supabase Storage du Recto
   id_document_verso_url     TEXT,                     -- URL Supabase Storage du Verso
+  id_document_selfie_url    TEXT,                     -- URL Supabase Storage du Selfie
   id_document_status  TEXT DEFAULT 'none'        -- Statut de vérification
     CHECK (id_document_status IN ('none', 'pending', 'verified', 'rejected'))
 );
