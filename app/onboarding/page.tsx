@@ -13,6 +13,31 @@ const AFRICAN_CITIES = [
 
 const TOTAL_STEPS = 3;
 
+// ─── Calcul d'âge à partir d'une date ISO ───────────────────────────────────
+function calculateAge(dateOfBirth: string): number {
+  const today = new Date();
+  const birthDate = new Date(dateOfBirth);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
+}
+
+// ─── Limites de date autorisées (30–45 ans) ─────────────────────────────────
+function getMinDate(): string {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 45);
+  return d.toISOString().split('T')[0]; // YYYY-MM-DD
+}
+
+function getMaxDate(): string {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 30);
+  return d.toISOString().split('T')[0]; // YYYY-MM-DD
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
 
@@ -26,6 +51,8 @@ export default function OnboardingPage() {
   const [step, setStep] = useState(1);
   const [direction, setDirection] = useState<'next' | 'prev'>('next');
   const [fullName, setFullName] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [ageError, setAgeError] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [city, setCity] = useState('');
   const [bio, setBio] = useState('');
@@ -75,11 +102,33 @@ export default function OnboardingPage() {
     checkAuth();
   }, [router]);
 
+  // ---------- Validation de la date de naissance ──────────────────────────
+  const validateAge = useCallback((dob: string): boolean => {
+    if (!dob) {
+      setAgeError('La date de naissance est obligatoire.');
+      return false;
+    }
+    const age = calculateAge(dob);
+    if (age < 30) {
+      setAgeError(`Vous devez avoir au moins 30 ans pour rejoindre AfriHeart. (Vous avez ${age} ans)`);
+      return false;
+    }
+    if (age > 45) {
+      setAgeError(`AfriHeart est réservé aux personnes de 30 à 45 ans. (Vous avez ${age} ans)`);
+      return false;
+    }
+    setAgeError('');
+    return true;
+  }, []);
+
   // ---------- Navigation ----------
   const goNext = useCallback(() => {
+    if (step === 1) {
+      if (!validateAge(dateOfBirth)) return;
+    }
     setDirection('next');
     setStep((s) => Math.min(s + 1, TOTAL_STEPS));
-  }, []);
+  }, [step, dateOfBirth, validateAge]);
 
   const goBack = useCallback(() => {
     setDirection('prev');
@@ -87,7 +136,7 @@ export default function OnboardingPage() {
   }, []);
 
   // ---------- Validation ----------
-  const canProceedStep1 = fullName.trim().length >= 2;
+  const canProceedStep1 = fullName.trim().length >= 2 && dateOfBirth.length > 0 && !ageError;
   const canProceedStep2 = phoneNumber.trim().length >= 6 && city.trim().length >= 2;
   const canSubmit = bio.trim().length > 0 && termsAccepted;
 
@@ -97,7 +146,6 @@ export default function OnboardingPage() {
     setError('');
 
     try {
-      // Utilisation recommandée de getUser() pour valider le JWT utilisateur en direct
       const { data: { user }, error: userError } = await supabase.auth.getUser();
 
       if (userError || !user) {
@@ -108,8 +156,8 @@ export default function OnboardingPage() {
       }
 
       const activeUserId = user.id;
+      const computedAge = dateOfBirth ? calculateAge(dateOfBirth) : undefined;
 
-      // On tente d'insérer le profil
       const { error: insertError } = await supabase
         .from('profiles')
         .insert({
@@ -118,11 +166,11 @@ export default function OnboardingPage() {
           phone_number: phoneNumber.trim(),
           city: city.trim(),
           bio: bio.trim(),
+          date_of_birth: dateOfBirth || null,
+          age: computedAge,
         });
 
       if (insertError) {
-        // Si l'erreur indique que la ligne existe déjà (code 23505 ou conflit de clé primaire),
-        // on effectue une mise à jour à la place.
         if (insertError.code === '23505' || insertError.message?.includes('duplicate key') || insertError.message?.includes('already exists')) {
           const { error: updateError } = await supabase
             .from('profiles')
@@ -131,6 +179,8 @@ export default function OnboardingPage() {
               phone_number: phoneNumber.trim(),
               city: city.trim(),
               bio: bio.trim(),
+              date_of_birth: dateOfBirth || null,
+              age: computedAge,
             })
             .eq('id', activeUserId);
 
@@ -145,14 +195,12 @@ export default function OnboardingPage() {
       router.replace('/dashboard');
     } catch (err: any) {
       console.error('Erreur détaillée de sauvegarde:', err);
-      
-      // Extraction des propriétés utiles
+
       const errMsg = err?.message || '';
       const errDetails = err?.details || '';
       const errHint = err?.hint || '';
       const errCode = err?.code || '';
 
-      // Construction d'une chaîne lisible de l'erreur pour l'utilisateur
       let displayError = 'Erreur lors de la sauvegarde : ';
       if (errMsg) {
         displayError += errMsg;
@@ -182,6 +230,10 @@ export default function OnboardingPage() {
   const stepLabels = ['Identité', 'Contact', 'Profil'];
 
   const signedUpWithPhone = !!userPhone;
+
+  // Âge calculé en temps réel pour l'affichage
+  const currentAge = dateOfBirth ? calculateAge(dateOfBirth) : null;
+  const ageIsValid = currentAge !== null && currentAge >= 30 && currentAge <= 45;
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-zinc-950 px-4 py-12">
@@ -250,9 +302,10 @@ export default function OnboardingPage() {
               className="flex transition-transform duration-500 ease-[cubic-bezier(0.25,0.46,0.45,0.94)]"
               style={{ transform: `translateX(-${(step - 1) * 100}%)` }}
             >
-              {/* ─── STEP 1 : Full Name ─── */}
+              {/* ─── STEP 1 : Full Name + Date de naissance ─── */}
               <div className="w-full flex-shrink-0 px-0.5">
                 <div className="space-y-5">
+                  {/* Nom complet */}
                   <div>
                     <label
                       htmlFor="fullName"
@@ -269,6 +322,70 @@ export default function OnboardingPage() {
                       className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-zinc-500 outline-none transition-all duration-300 focus:border-amber-500 focus:bg-white/[0.07] focus:ring-1 focus:ring-amber-500/30"
                     />
                   </div>
+
+                  {/* Date de naissance */}
+                  <div>
+                    <label
+                      htmlFor="dateOfBirth"
+                      className="mb-1.5 block text-sm font-medium text-zinc-300"
+                    >
+                      Date de naissance <span className="text-amber-500">*</span>
+                    </label>
+                    <input
+                      id="dateOfBirth"
+                      type="date"
+                      value={dateOfBirth}
+                      min={getMinDate()}
+                      max={getMaxDate()}
+                      onChange={(e) => {
+                        setDateOfBirth(e.target.value);
+                        if (e.target.value) validateAge(e.target.value);
+                        else setAgeError('');
+                      }}
+                      className={`w-full rounded-xl border px-4 py-3 text-sm text-white outline-none transition-all duration-300 focus:ring-1 bg-white/5
+                        ${ageError
+                          ? 'border-rose-500/60 focus:border-rose-500 focus:ring-rose-500/30'
+                          : ageIsValid
+                            ? 'border-emerald-500/40 focus:border-emerald-500 focus:ring-emerald-500/30'
+                            : 'border-white/10 focus:border-amber-500 focus:ring-amber-500/30'
+                        }`}
+                      style={{ colorScheme: 'dark' }}
+                    />
+
+                    {/* Feedback âge en temps réel */}
+                    {dateOfBirth && !ageError && currentAge !== null && (
+                      <div className={`mt-2 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium
+                        ${ageIsValid
+                          ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                          : 'bg-rose-500/10 border border-rose-500/20 text-rose-400'
+                        }`}
+                      >
+                        <span>{ageIsValid ? '✓' : '✗'}</span>
+                        <span>
+                          {ageIsValid
+                            ? `Vous avez ${currentAge} ans — éligible ✨`
+                            : `Vous avez ${currentAge} ans — hors de la tranche 30–45 ans`
+                          }
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Message d'erreur */}
+                    {ageError && (
+                      <div className="mt-2 flex items-start gap-2 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-400">
+                        <span className="mt-0.5 shrink-0">⚠️</span>
+                        <span>{ageError}</span>
+                      </div>
+                    )}
+
+                    {/* Indication de la plage autorisée */}
+                    {!dateOfBirth && (
+                      <p className="mt-1.5 text-xs text-zinc-500">
+                        AfriHeart est réservé aux personnes entre <span className="text-amber-400 font-medium">30 et 45 ans</span>.
+                      </p>
+                    )}
+                  </div>
+
                   <p className="text-xs leading-relaxed text-zinc-500">
                     Utilisez votre vrai nom pour que les autres membres puissent vous
                     reconnaître.
@@ -366,6 +483,14 @@ export default function OnboardingPage() {
                     </div>
                   </div>
 
+                  {/* Rappel vérification identité */}
+                  <div className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+                    <span className="text-lg shrink-0">🪪</span>
+                    <div className="text-xs leading-relaxed text-zinc-400">
+                      <span className="font-semibold text-amber-400">Étape suivante :</span> Après avoir créé votre profil, vous devrez uploader une pièce d&apos;identité (CNI ou Passeport) pour être vérifié et accéder à toutes les fonctionnalités.
+                    </div>
+                  </div>
+
                   {/* Terms */}
                   <label className="flex cursor-pointer items-start gap-3">
                     <input
@@ -415,7 +540,7 @@ export default function OnboardingPage() {
                 type="button"
                 onClick={goNext}
                 disabled={
-                  (step === 1 && !canProceedStep1) ||
+                  (step === 1 && (!canProceedStep1 || !!ageError)) ||
                   (step === 2 && !canProceedStep2)
                 }
                 className="ml-auto flex h-12 items-center justify-center rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-8 text-sm font-semibold text-zinc-950 shadow-lg shadow-amber-500/20 transition-all duration-300 hover:from-amber-400 hover:to-orange-400 hover:shadow-amber-500/30 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"

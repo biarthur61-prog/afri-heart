@@ -72,7 +72,7 @@ export default function DashboardPage() {
 
   // Premium / VIP modal state
   const [showVipModal, setShowVipModal] = useState(false);
-  const [vipModalSource, setVipModalSource] = useState<'likes_limit' | 'received_likes' | 'sidebar' | 'messages_limit'>('likes_limit');
+  const [vipModalSource, setVipModalSource] = useState<'likes_limit' | 'received_likes' | 'sidebar' | 'messages_limit' | 'unverified_profile' | 'unverified_messages'>('likes_limit');
   const [isVip, setIsVip] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
 
@@ -83,6 +83,13 @@ export default function DashboardPage() {
     setShowCelebration(true);
     setTimeout(() => setShowCelebration(false), 5000);
   };
+
+  // Identité — upload CNI/Passeport
+  const [idDocFile, setIdDocFile] = useState<File | null>(null);
+  const [idDocPreview, setIdDocPreview] = useState<string | null>(null);
+  const [idDocUploading, setIdDocUploading] = useState(false);
+  const [idDocError, setIdDocError] = useState('');
+  const [idDocSuccess, setIdDocSuccess] = useState(false);
 
   // Chat tracking state
   const [sentMessagesCount, setSentMessagesCount] = useState(0);
@@ -117,6 +124,10 @@ export default function DashboardPage() {
       { sender: 'them', text: 'Je vais bien merci, je suis à Dakar en ce moment et toi ? ☀️', time: '14:06' },
     ]
   });
+
+  // ── Accès débloqué si ET SEULEMENT SI vérifié ET VIP ──────────────────────
+  // S'applique également aux hommes et aux femmes
+  const isUnlocked = isVip && (currentProfile?.is_verified ?? false);
 
   // ---------- Load Auth & Profile & Likes & Profiles list ----------
   const loadDashboardData = async () => {
@@ -256,8 +267,13 @@ export default function DashboardPage() {
         console.info('Dislike DB catch (ignored):', err?.message);
       }
     } else {
-      // Like: check VIP limit of 10 likes per day
-      if (dbLikesSent.length >= 10 && !isVip) {
+      // Like: vérifier que l'utilisateur est vérifié ET VIP (contrainte symétrique H/F)
+      if (!isUnlocked) {
+        setVipModalSource(currentProfile?.is_verified ? 'likes_limit' : 'unverified_profile');
+        setShowVipModal(true);
+        return;
+      }
+      if (dbLikesSent.length >= 10) {
         setVipModalSource('likes_limit');
         setShowVipModal(true);
         return;
@@ -320,8 +336,9 @@ export default function DashboardPage() {
     e.preventDefault();
     if (!newMessage.trim() || !selectedChat) return;
 
-    if (!isVip && sentMessagesCount >= 2) {
-      setVipModalSource('messages_limit');
+    // Bloquer l'accès aux messages si non vérifié OU non VIP (contrainte symétrique H/F)
+    if (!isUnlocked) {
+      setVipModalSource(currentProfile?.is_verified ? 'messages_limit' : 'unverified_messages');
       setShowVipModal(true);
       return;
     }
@@ -407,6 +424,55 @@ export default function DashboardPage() {
       setProfileSaveError(err.message || 'Impossible de sauvegarder les modifications.');
     } finally {
       setProfileSaving(false);
+    }
+  };
+
+  // ---------- Upload pièce d'identité (CNI / Passeport) ----------
+  const handleIdDocumentUpload = async () => {
+    if (!idDocFile || !currentUser) return;
+
+    setIdDocUploading(true);
+    setIdDocError('');
+    setIdDocSuccess(false);
+
+    try {
+      const fileExt = idDocFile.name.split('.').pop();
+      const filePath = `${currentUser.id}/identity.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('identity-docs')
+        .upload(filePath, idDocFile, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage
+        .from('identity-docs')
+        .getPublicUrl(filePath);
+
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          id_document_url: urlData.publicUrl,
+          id_document_status: 'pending',
+        })
+        .eq('id', currentUser.id);
+
+      if (updateError) throw updateError;
+
+      setCurrentProfile((prev) =>
+        prev ? { ...prev, id_document_url: urlData.publicUrl, id_document_status: 'pending' } : null
+      );
+      setIdDocSuccess(true);
+      setIdDocFile(null);
+      setIdDocPreview(null);
+    } catch (err: any) {
+      console.error('Erreur upload CNI:', err);
+      setIdDocError(
+        err.message ||
+          "Erreur lors de l'upload. Vérifiez que le bucket 'identity-docs' existe dans Supabase Storage."
+      );
+    } finally {
+      setIdDocUploading(false);
     }
   };
 
@@ -711,80 +777,134 @@ export default function DashboardPage() {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredProfiles.map((p) => {
-                  const isLiked = dbLikesSent.some(l => l.receiver_id === p.id);
-                  const isMatch = matches.some(m => (m.user_1 === p.id || m.user_2 === p.id));
-                  
-                  return (
+              <div className="relative">
+                {/* Profils grid */}
+                <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 transition-all duration-300 ${!isUnlocked ? 'opacity-40 blur-[3px] pointer-events-none select-none' : ''}`}>
+                  {filteredProfiles.map((p) => {
+                    const isLiked = dbLikesSent.some(l => l.receiver_id === p.id);
+                    const isMatch = matches.some(m => (m.user_1 === p.id || m.user_2 === p.id));
+
+                    return (
+                      <div
+                        key={p.id}
+                        className="group relative overflow-hidden rounded-2xl glass hover:border-amber-500/30 transition-all duration-500 flex flex-col justify-between"
+                      >
+                        <div className="h-44 bg-gradient-to-br from-zinc-800 via-amber-900/40 to-rose-950/50 relative p-4 flex flex-col justify-between">
+                          <div className="flex items-center justify-between w-full">
+                            <span className="bg-black/60 backdrop-blur-md text-[10px] text-zinc-300 font-semibold px-2 py-0.5 rounded-full border border-white/5">
+                              📍 {p.city}
+                            </span>
+                            {isMatch ? (
+                              <span className="bg-rose-500/20 backdrop-blur-md border border-rose-500/30 text-rose-400 text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                                💘 Match !
+                              </span>
+                            ) : p.is_verified ? (
+                              <span className="bg-emerald-500/20 backdrop-blur-md border border-emerald-500/30 text-emerald-400 text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                                ✓ Vérifié
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <span className="text-zinc-700/20 text-8xl font-black group-hover:scale-110 transition-transform duration-700 select-none">
+                              {p.full_name.charAt(0)}
+                            </span>
+                          </div>
+                          <div className="relative z-10">
+                            <h3 className="text-lg font-bold text-white flex items-center gap-1.5 drop-shadow-md">
+                              {p.full_name.split(' ')[0]}, {p.age} ans
+                            </h3>
+                            <span className="text-[10px] text-amber-300/90 font-medium tracking-wide uppercase drop-shadow-md">
+                              {p.objective}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="p-5 flex-1 flex flex-col justify-between bg-zinc-900/20">
+                          <p className="text-zinc-300 text-xs leading-relaxed line-clamp-3 mb-6">
+                            {p.bio || 'Aucune biographie rédigée.'}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleLike(p.id)}
+                              className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                isLiked
+                                  ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20'
+                                  : 'bg-white/5 text-zinc-300 hover:bg-white/10 hover:text-white border border-white/5'
+                              }`}
+                            >
+                              <span>❤️</span>
+                              {isLiked ? 'Liké' : 'Liker'}
+                            </button>
+                            <button
+                              onClick={() => startChat(p)}
+                              className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold p-2 rounded-xl transition-all cursor-pointer flex items-center justify-center"
+                              title="Envoyer un message"
+                            >
+                              💬
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* ── Paywall overlay : accès bloqué si non vérifié OU non VIP ── */}
+                {!isUnlocked && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center px-4">
                     <div
-                      key={p.id}
-                      className="group relative overflow-hidden rounded-2xl glass hover:border-amber-500/30 transition-all duration-500 flex flex-col justify-between"
+                      className="w-full max-w-md rounded-3xl p-8 text-center space-y-5 shadow-2xl border"
+                      style={{
+                        background: 'linear-gradient(135deg, rgba(9,9,11,0.97) 60%, rgba(28,16,8,0.97) 100%)',
+                        borderColor: 'rgba(251,191,36,0.3)',
+                        boxShadow: '0 0 0 1px rgba(251,191,36,0.2), 0 32px 80px rgba(0,0,0,0.7)',
+                      }}
                     >
-                      <div className="h-44 bg-gradient-to-br from-zinc-800 via-amber-900/40 to-rose-950/50 relative p-4 flex flex-col justify-between">
-                        
-                        <div className="flex items-center justify-between w-full">
-                          <span className="bg-black/60 backdrop-blur-md text-[10px] text-zinc-300 font-semibold px-2 py-0.5 rounded-full border border-white/5">
-                            📍 {p.city}
-                          </span>
-                          
-                          {isMatch ? (
-                            <span className="bg-rose-500/20 backdrop-blur-md border border-rose-500/30 text-rose-400 text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                              💘 Match !
-                            </span>
-                          ) : p.is_verified ? (
-                            <span className="bg-emerald-500/20 backdrop-blur-md border border-emerald-500/30 text-emerald-400 text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                              ✓ Vérifié
-                            </span>
-                          ) : null}
-                        </div>
-
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                          <span className="text-zinc-700/20 text-8xl font-black group-hover:scale-110 transition-transform duration-700 select-none">
-                            {p.full_name.charAt(0)}
-                          </span>
-                        </div>
-
-                        <div className="relative z-10">
-                          <h3 className="text-lg font-bold text-white flex items-center gap-1.5 drop-shadow-md">
-                            {p.full_name.split(' ')[0]}, {p.age} ans
-                          </h3>
-                          <span className="text-[10px] text-amber-300/90 font-medium tracking-wide uppercase drop-shadow-md">
-                            {p.objective}
-                          </span>
-                        </div>
+                      <div
+                        className="mx-auto w-20 h-20 rounded-2xl flex items-center justify-center text-4xl shadow-xl"
+                        style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316, #e11d48)', boxShadow: '0 12px 40px rgba(251,191,36,0.35)' }}
+                      >
+                        {!currentProfile?.is_verified ? '🪪' : '👑'}
                       </div>
-
-                      <div className="p-5 flex-1 flex flex-col justify-between bg-zinc-900/20">
-                        <p className="text-zinc-300 text-xs leading-relaxed line-clamp-3 mb-6">
-                          {p.bio || 'Aucune biographie rédigée.'}
+                      <div>
+                        <h3 className="text-xl font-black text-white mb-2">
+                          {!currentProfile?.is_verified ? 'Vérifiez votre identité' : 'Abonnement VIP requis'}
+                        </h3>
+                        <p className="text-zinc-400 text-sm leading-relaxed">
+                          {!currentProfile?.is_verified
+                            ? "Uploadez votre CNI ou passeport dans l'onglet Profil pour accéder aux rencontres AfriHeart."
+                            : 'Passez à AfriHeart VIP pour accéder à tous les profils et envoyer des messages illimités.'}
                         </p>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleLike(p.id)}
-                            className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                              isLiked
-                                ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20'
-                                : 'bg-white/5 text-zinc-300 hover:bg-white/10 hover:text-white border border-white/5'
-                            }`}
-                          >
-                            <span>❤️</span>
-                            {isLiked ? 'Liké' : 'Liker'}
-                          </button>
-                          
-                          <button
-                            onClick={() => startChat(p)}
-                            className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold p-2 rounded-xl transition-all cursor-pointer flex items-center justify-center"
-                            title="Envoyer un message"
-                          >
-                            💬
-                          </button>
-                        </div>
                       </div>
+                      {!currentProfile?.is_verified ? (
+                        <button
+                          onClick={() => setActiveTab('profile')}
+                          className="w-full py-3 rounded-xl font-bold text-sm text-zinc-950 transition-all hover:brightness-110"
+                          style={{ background: 'linear-gradient(90deg, #f59e0b, #f97316, #e11d48)', boxShadow: '0 8px 32px rgba(251,191,36,0.35)' }}
+                        >
+                          Vérifier mon identité 🪪
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => { setVipModalSource('sidebar'); setShowVipModal(true); }}
+                          className="w-full py-3 rounded-xl font-bold text-sm text-zinc-950 transition-all hover:brightness-110"
+                          style={{ background: 'linear-gradient(90deg, #f59e0b, #f97316, #e11d48)', boxShadow: '0 8px 32px rgba(251,191,36,0.35)' }}
+                        >
+                          Passer VIP maintenant 👑
+                        </button>
+                      )}
+                      <p className="text-[11px] text-zinc-500">
+                        Les deux conditions sont requises :{' '}
+                        <span className={currentProfile?.is_verified ? 'text-emerald-400' : 'text-rose-400'}>
+                          {currentProfile?.is_verified ? '✓' : '✗'} Identité vérifiée
+                        </span>
+                        {' & '}
+                        <span className={isVip ? 'text-emerald-400' : 'text-rose-400'}>
+                          {isVip ? '✓' : '✗'} Abonnement VIP
+                        </span>
+                      </p>
                     </div>
-                  );
-                })}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -846,9 +966,9 @@ export default function DashboardPage() {
             <div className="space-y-6 pt-6 border-t border-white/5">
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-bold text-zinc-200">Ils vous ont liké ({likedByOthers.length})</h2>
-                {!isVip && (
+                {!isUnlocked && (
                   <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                    Premium requis 👑
+                    {!currentProfile?.is_verified ? '🪪 Vérification requise' : '👑 VIP requis'}
                   </span>
                 )}
               </div>
@@ -865,23 +985,23 @@ export default function DashboardPage() {
                       <div className="flex items-center gap-3">
                         {/* Blur avatar if not VIP */}
                         <div className={`w-12 h-12 rounded-xl bg-gradient-to-br from-amber-400 to-rose-500 flex items-center justify-center font-bold text-white text-lg transition-all ${
-                          !isVip ? 'blur-md select-none' : ''
+                          !isUnlocked ? 'blur-md select-none' : ''
                         }`}>
                           {p.full_name.charAt(0)}
                         </div>
                         <div>
-                          {/* Blur name if not VIP */}
-                          <h4 className={`font-bold text-sm transition-all ${!isVip ? 'blur-md select-none' : ''}`}>
+                          {/* Blur name if non vérifié OU non VIP */}
+                          <h4 className={`font-bold text-sm transition-all ${!isUnlocked ? 'blur-md select-none' : ''}`}>
                             {p.full_name}
                           </h4>
-                          <p className={`text-zinc-500 text-xs transition-all ${!isVip ? 'blur-md select-none' : ''}`}>
+                          <p className={`text-zinc-500 text-xs transition-all ${!isUnlocked ? 'blur-md select-none' : ''}`}>
                             {p.city}
                           </p>
                         </div>
                       </div>
 
-                      {/* Display Action Button or Premium Block */}
-                      {isVip ? (
+                      {/* Display Action Button or Premium/Verification Block */}
+                      {isUnlocked ? (
                         <div className="flex gap-2">
                           <button
                             onClick={() => startChat(p)}
@@ -898,10 +1018,13 @@ export default function DashboardPage() {
                         </div>
                       ) : (
                         <button
-                          onClick={() => { setVipModalSource('received_likes'); setShowVipModal(true); }}
+                          onClick={() => {
+                            setVipModalSource(!currentProfile?.is_verified ? 'unverified_profile' : 'received_likes');
+                            setShowVipModal(true);
+                          }}
                           className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-rose-500 text-white rounded-lg text-[10px] font-bold shadow-lg shadow-amber-500/25 hover:brightness-110 cursor-pointer"
                         >
-                          Débloquer 👑
+                          {!currentProfile?.is_verified ? 'Vérifier 🪪' : 'Débloquer 👑'}
                         </button>
                       )}
                     </div>
@@ -909,19 +1032,28 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* VIP Banner if not VIP */}
-              {!isVip && likedByOthers.length > 0 && (
+              {/* Banner paywall si non vérifié OU non VIP */}
+              {!isUnlocked && likedByOthers.length > 0 && (
                 <div className="glass p-6 rounded-2xl border border-amber-500/20 text-center max-w-xl mx-auto space-y-4 bg-gradient-to-r from-amber-500/5 to-rose-500/5">
-                  <span className="text-3xl">👑</span>
-                  <h3 className="font-bold text-sm">Découvrez qui vous aime avec AfriHeart VIP</h3>
+                  <span className="text-3xl">{!currentProfile?.is_verified ? '🪪' : '👑'}</span>
+                  <h3 className="font-bold text-sm">
+                    {!currentProfile?.is_verified
+                      ? 'Vérifiez votre identité pour débloquer vos admirateurs'
+                      : 'Découvrez qui vous aime avec AfriHeart VIP'}
+                  </h3>
                   <p className="text-zinc-400 text-xs max-w-md mx-auto">
-                    Ne laissez pas passer votre âme sœur. Accédez instantanément à la liste complète des personnes qui vous ont liké en passant à notre abonnement VIP.
+                    {!currentProfile?.is_verified
+                      ? "Uploadez votre CNI ou passeport dans l'onglet Profil pour accéder à la liste de vos admirateurs."
+                      : 'Ne laissez pas passer votre âme sœur. Accédez instantanément à la liste complète des personnes qui vous ont liké.'}
                   </p>
                   <button
-                    onClick={() => { setVipModalSource('received_likes'); setShowVipModal(true); }}
+                    onClick={() => {
+                      if (!currentProfile?.is_verified) { setActiveTab('profile'); }
+                      else { setVipModalSource('received_likes'); setShowVipModal(true); }
+                    }}
                     className="px-6 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 text-white text-xs font-bold shadow-lg hover:brightness-110 cursor-pointer"
                   >
-                    Passer à AfriHeart VIP
+                    {!currentProfile?.is_verified ? 'Vérifier mon identité 🪪' : 'Passer à AfriHeart VIP 👑'}
                   </button>
                 </div>
               )}
@@ -1204,17 +1336,16 @@ export default function DashboardPage() {
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-zinc-400 ml-1">Tranche d'âge recherchée</label>
+                    <label className="text-xs font-semibold text-zinc-400 ml-1">Tranche d&apos;âge recherchée</label>
                     <select
                       value={editSearchAgeRange}
                       onChange={(e) => setEditSearchAgeRange(e.target.value)}
                       className="w-full bg-zinc-900/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-amber-500 focus:bg-zinc-900 transition-all hover:border-white/20 appearance-none"
                     >
                       <option value="">Indifférent</option>
-                      <option value="18-25">18 - 25 ans</option>
-                      <option value="26-35">26 - 35 ans</option>
-                      <option value="36-45">36 - 45 ans</option>
-                      <option value="46+">46 ans et plus</option>
+                      <option value="30-35">30 - 35 ans</option>
+                      <option value="36-40">36 - 40 ans</option>
+                      <option value="41-45">41 - 45 ans</option>
                     </select>
                   </div>
                   <div className="space-y-1.5">
@@ -1226,22 +1357,181 @@ export default function DashboardPage() {
                     >
                       <option value="">Toutes les villes</option>
                       <option value="Ma ville uniquement">Ma ville uniquement</option>
-                      <option value="Internationale">Internationale (Toute l'Afrique & Diaspora)</option>
+                      <option value="Internationale">Internationale (Toute l&apos;Afrique &amp; Diaspora)</option>
                     </select>
                   </div>
                 </div>
               </div>
 
+              {/* ════════════════════════════════════════════════════════
+                   Section 3 : Vérification d'identité (CNI / Passeport)
+                   Contrainte : is_verified requis pour accès aux profils
+              ════════════════════════════════════════════════════════ */}
+              <div className="space-y-5 pt-6 border-t border-white/5 relative z-10">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <h3 className="text-lg font-bold text-zinc-100 flex items-center gap-2">
+                    <span className="text-blue-400">🪪</span> Vérification d&apos;identité
+                  </h3>
+                  {currentProfile?.is_verified ? (
+                    <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5">
+                      ✓ Identité vérifiée
+                    </span>
+                  ) : currentProfile?.id_document_status === 'pending' ? (
+                    <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5">
+                      ⏳ En cours de vérification
+                    </span>
+                  ) : currentProfile?.id_document_status === 'rejected' ? (
+                    <span className="bg-rose-500/10 text-rose-400 border border-rose-500/20 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5">
+                      ✗ Document refusé
+                    </span>
+                  ) : (
+                    <span className="bg-zinc-800/60 text-zinc-400 border border-white/10 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5">
+                      🔴 Non vérifié
+                    </span>
+                  )}
+                </div>
+
+                {currentProfile?.is_verified ? (
+                  <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5 flex items-center gap-4">
+                    <span className="text-3xl shrink-0">✅</span>
+                    <div>
+                      <p className="text-sm font-bold text-emerald-400 mb-0.5">Identité vérifiée avec succès !</p>
+                      <p className="text-xs text-zinc-400">Votre pièce d&apos;identité a été validée. Vous avez accès complet à AfriHeart (avec VIP).</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Info banner */}
+                    <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 flex items-start gap-3">
+                      <span className="text-xl shrink-0 mt-0.5">ℹ️</span>
+                      <div className="text-xs text-zinc-400 leading-relaxed">
+                        <span className="font-semibold text-blue-400">Pourquoi vérifier mon identité ?</span><br />
+                        La vérification garantit la sécurité de tous les membres. Vous devez être{' '}
+                        <strong className="text-white">vérifié</strong> ET <strong className="text-white">abonné VIP</strong>{' '}
+                        pour accéder aux profils et à la messagerie — hommes et femmes.
+                      </div>
+                    </div>
+
+                    {currentProfile?.id_document_status === 'pending' ? (
+                      <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-5 text-center space-y-2">
+                        <span className="text-2xl">⏳</span>
+                        <p className="text-sm font-bold text-amber-400">Document en cours de vérification</p>
+                        <p className="text-xs text-zinc-400">Notre équipe examine votre document. La vérification prend généralement 24–48h ouvrables.</p>
+                      </div>
+                    ) : currentProfile?.id_document_status === 'rejected' ? (
+                      <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4 flex items-start gap-3">
+                        <span className="text-xl shrink-0">⚠️</span>
+                        <div className="text-xs text-zinc-400">
+                          <p className="font-semibold text-rose-400 mb-1">Document refusé</p>
+                          <p>Veuillez soumettre un nouveau document lisible (CNI ou Passeport en cours de validité).</p>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {/* Zone d'upload */}
+                    {currentProfile?.id_document_status !== 'pending' && (
+                      <div className="space-y-3">
+                        <label className="text-xs font-semibold text-zinc-400">
+                          {currentProfile?.id_document_status === 'rejected' ? 'Nouveau document' : 'CNI ou Passeport'}{' '}
+                          <span className="text-amber-500">*</span>
+                        </label>
+
+                        {/* Drop zone */}
+                        <label
+                          htmlFor="idDocInput"
+                          className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-8 cursor-pointer transition-all duration-300
+                            ${idDocPreview ? 'border-amber-500/40 bg-amber-500/5' : 'border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]'}`}
+                        >
+                          {idDocPreview ? (
+                            <div className="space-y-3 w-full text-center">
+                              <img src={idDocPreview} alt="Aperçu CNI" className="mx-auto max-h-40 rounded-xl object-cover border border-white/10" />
+                              <p className="text-xs text-zinc-400">{idDocFile?.name}</p>
+                              <p className="text-[11px] text-amber-400">Cliquez pour changer le fichier</p>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="text-4xl">🪪</span>
+                              <div className="text-center">
+                                <p className="text-sm font-medium text-zinc-300">Glissez votre document ici</p>
+                                <p className="text-xs text-zinc-500 mt-1">ou cliquez pour sélectionner</p>
+                              </div>
+                              <p className="text-[11px] text-zinc-600">JPG, PNG ou PDF · Max 5 Mo</p>
+                            </>
+                          )}
+                          <input
+                            id="idDocInput"
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp,application/pdf"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                setIdDocFile(file);
+                                setIdDocError('');
+                                setIdDocSuccess(false);
+                                if (file.type.startsWith('image/')) {
+                                  const reader = new FileReader();
+                                  reader.onload = (ev) => setIdDocPreview(ev.target?.result as string);
+                                  reader.readAsDataURL(file);
+                                } else {
+                                  setIdDocPreview(null);
+                                }
+                              }
+                            }}
+                          />
+                        </label>
+
+                        {/* Feedback */}
+                        {idDocError && (
+                          <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 flex items-start gap-2 text-xs text-rose-400">
+                            <span className="shrink-0 mt-0.5">⚠️</span>
+                            {idDocError}
+                          </div>
+                        )}
+                        {idDocSuccess && (
+                          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 flex items-center gap-2 text-xs text-emerald-400">
+                            <span>✓</span>
+                            Document envoyé ! Notre équipe va examiner votre pièce d&apos;identité sous 24–48h.
+                          </div>
+                        )}
+
+                        {/* Bouton envoi */}
+                        <button
+                          type="button"
+                          onClick={handleIdDocumentUpload}
+                          disabled={!idDocFile || idDocUploading}
+                          className="w-full py-3 rounded-xl font-bold text-sm text-white shadow-lg transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                          style={{ background: 'linear-gradient(90deg, #2563eb, #4f46e5)', boxShadow: '0 8px 24px rgba(37,99,235,0.25)' }}
+                        >
+                          {idDocUploading ? (
+                            <>
+                              <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                              </svg>
+                              Envoi en cours...
+                            </>
+                          ) : (
+                            <>📤 Envoyer pour vérification</>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Bouton de sauvegarde */}
               <div className="pt-8 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4 relative z-10">
-                <div className="flex items-center gap-2">
-                  {currentProfile?.is_verified ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Badge accès débloqué */}
+                  {isUnlocked ? (
                     <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5">
-                      ✓ Profil Vérifié
+                      ✓ Accès complet activé
                     </span>
                   ) : (
                     <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5">
-                      🔒 En attente de Selfie
+                      {!currentProfile?.is_verified ? '🪪 Identité non vérifiée' : '👑 VIP requis'}
                     </span>
                   )}
                 </div>
@@ -1376,6 +1666,8 @@ export default function DashboardPage() {
                       {vipModalSource === 'received_likes' && 'Découvrez qui a flashé sur votre profil.'}
                       {vipModalSource === 'messages_limit' && 'Vous avez atteint votre limite de messages gratuits.'}
                       {vipModalSource === 'sidebar' && "Débloquez toute l'expérience AfriHeart."}
+                      {vipModalSource === 'unverified_profile' && 'Vérifiez votre identité ET passez VIP pour accéder aux profils.'}
+                      {vipModalSource === 'unverified_messages' && 'Vérifiez votre identité ET passez VIP pour envoyer des messages.'}
                     </p>
                   </div>
                 </div>
