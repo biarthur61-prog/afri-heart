@@ -4,12 +4,21 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-const AFRICAN_CITIES = [
-  'Abidjan', 'Dakar', 'Douala', 'Yaoundé', 'Kinshasa',
-  'Brazzaville', 'Bamako', 'Ouagadougou', 'Lomé', 'Cotonou',
-  'Conakry', 'Libreville', 'Niamey', 'Accra', 'Lagos',
-  'Nairobi', 'Johannesburg', 'Casablanca', 'Tunis', 'Alger',
-];
+const AFRICAN_COUNTRIES_CITIES: Record<string, string[]> = {
+  "Bénin": ["Cotonou", "Porto-Novo", "Parakou", "Abomey", "Ouidah"],
+  "Burkina Faso": ["Ouagadougou", "Bobo-Dioulasso", "Koudougou", "Banfora"],
+  "Cameroun": ["Douala", "Yaoundé", "Garoua", "Bamenda", "Maroua"],
+  "Congo": ["Brazzaville", "Pointe-Noire", "Dolisie", "Nkayi"],
+  "Côte d'Ivoire": ["Abidjan", "Bouaké", "Daloa", "Yamoussoukro", "San-Pédro"],
+  "Gabon": ["Libreville", "Port-Gentil", "Franceville", "Oyem"],
+  "Ghana": ["Accra", "Kumasi", "Tamale", "Takoradi", "Cape Coast"],
+  "Guinée": ["Conakry", "Nzérékoré", "Kankan", "Kindia", "Labé"],
+  "Mali": ["Bamako", "Sikasso", "Mopti", "Koutiala", "Ségou"],
+  "Nigéria": ["Lagos", "Abuja", "Kano", "Ibadan", "Port Harcourt"],
+  "RD Congo": ["Kinshasa", "Lubumbashi", "Mbuji-Mayi", "Kisangani", "Goma"],
+  "Sénégal": ["Dakar", "Thiès", "Rufisque", "Ziguinchor", "Saint-Louis"],
+  "Togo": ["Lomé", "Sokodé", "Kara", "Kpalimé", "Atakpamé"],
+};
 
 const TOTAL_STEPS = 3;
 
@@ -54,8 +63,12 @@ export default function OnboardingPage() {
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [ageError, setAgeError] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [country, setCountry] = useState('');
   const [city, setCity] = useState('');
   const [bio, setBio] = useState('');
+  const [gender, setGender] = useState('');
+  const [isSingleParent, setIsSingleParent] = useState(false);
+  const [childrenCount, setChildrenCount] = useState<number | ''>('');
   const [termsAccepted, setTermsAccepted] = useState(false);
 
   // Submit state
@@ -136,9 +149,9 @@ export default function OnboardingPage() {
   }, []);
 
   // ---------- Validation ----------
-  const canProceedStep1 = fullName.trim().length >= 2 && dateOfBirth.length > 0 && !ageError;
-  const canProceedStep2 = phoneNumber.trim().length >= 6 && city.trim().length >= 2;
-  const canSubmit = bio.trim().length > 0 && termsAccepted;
+  const canProceedStep1 = fullName.trim().length >= 2 && dateOfBirth.length > 0 && !ageError && gender !== '';
+  const canProceedStep2 = phoneNumber.trim().length >= 6 && country !== '' && city !== '';
+  const canSubmit = bio.trim().length > 0 && termsAccepted && (!isSingleParent || (isSingleParent && typeof childrenCount === 'number' && childrenCount > 0));
 
   // ---------- Submit ----------
   const handleSubmit = async () => {
@@ -164,10 +177,14 @@ export default function OnboardingPage() {
           id: activeUserId,
           full_name: fullName.trim(),
           phone_number: phoneNumber.trim(),
-          city: city.trim(),
+          country: country,
+          city: city,
           bio: bio.trim(),
           date_of_birth: dateOfBirth || null,
           age: computedAge,
+          gender: gender,
+          is_single_parent: isSingleParent,
+          children_count: isSingleParent ? (childrenCount || 0) : 0,
         });
 
       if (insertError) {
@@ -177,10 +194,14 @@ export default function OnboardingPage() {
             .update({
               full_name: fullName.trim(),
               phone_number: phoneNumber.trim(),
-              city: city.trim(),
+              country: country,
+              city: city,
               bio: bio.trim(),
               date_of_birth: dateOfBirth || null,
               age: computedAge,
+              gender: gender,
+              is_single_parent: isSingleParent,
+              children_count: isSingleParent ? (childrenCount || 0) : 0,
             })
             .eq('id', activeUserId);
 
@@ -323,6 +344,26 @@ export default function OnboardingPage() {
                     />
                   </div>
 
+                  {/* Genre */}
+                  <div>
+                    <label
+                      htmlFor="gender"
+                      className="mb-1.5 block text-sm font-medium text-zinc-300"
+                    >
+                      Genre <span className="text-amber-500">*</span>
+                    </label>
+                    <select
+                      id="gender"
+                      value={gender}
+                      onChange={(e) => setGender(e.target.value)}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition-all duration-300 focus:border-amber-500 focus:bg-white/[0.07] focus:ring-1 focus:ring-amber-500/30"
+                    >
+                      <option value="" disabled className="text-zinc-500">Sélectionnez votre genre</option>
+                      <option value="male" className="bg-zinc-900 text-white">Homme</option>
+                      <option value="female" className="bg-zinc-900 text-white">Femme</option>
+                    </select>
+                  </div>
+
                   {/* Date de naissance */}
                   <div>
                     <label
@@ -422,6 +463,30 @@ export default function OnboardingPage() {
                     )}
                   </div>
 
+                  {/* Country */}
+                  <div>
+                    <label
+                      htmlFor="country"
+                      className="mb-1.5 block text-sm font-medium text-zinc-300"
+                    >
+                      Pays <span className="text-amber-500">*</span>
+                    </label>
+                    <select
+                      id="country"
+                      value={country}
+                      onChange={(e) => {
+                        setCountry(e.target.value);
+                        setCity('');
+                      }}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition-all duration-300 focus:border-amber-500 focus:bg-white/[0.07] focus:ring-1 focus:ring-amber-500/30"
+                    >
+                      <option value="" disabled className="text-zinc-500">Sélectionnez votre pays</option>
+                      {Object.keys(AFRICAN_COUNTRIES_CITIES).sort().map(c => (
+                        <option key={c} value={c} className="bg-zinc-900 text-white">{c}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   {/* City */}
                   <div>
                     <label
@@ -430,20 +495,18 @@ export default function OnboardingPage() {
                     >
                       Ville <span className="text-amber-500">*</span>
                     </label>
-                    <input
+                    <select
                       id="city"
-                      type="text"
-                      list="african-cities"
-                      placeholder="Votre ville"
                       value={city}
                       onChange={(e) => setCity(e.target.value)}
-                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-zinc-500 outline-none transition-all duration-300 focus:border-amber-500 focus:bg-white/[0.07] focus:ring-1 focus:ring-amber-500/30"
-                    />
-                    <datalist id="african-cities">
-                      {AFRICAN_CITIES.map((c) => (
-                        <option key={c} value={c} />
+                      disabled={!country}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition-all duration-300 focus:border-amber-500 focus:bg-white/[0.07] focus:ring-1 focus:ring-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="" disabled className="text-zinc-500">Sélectionnez votre ville</option>
+                      {country && AFRICAN_COUNTRIES_CITIES[country]?.map((c) => (
+                        <option key={c} value={c} className="bg-zinc-900 text-white">{c}</option>
                       ))}
-                    </datalist>
+                    </select>
                   </div>
                 </div>
               </div>
@@ -481,6 +544,62 @@ export default function OnboardingPage() {
                         {bio.length}/300
                       </span>
                     </div>
+                  </div>
+
+                  {/* Parent célibataire */}
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-zinc-300">
+                      Êtes-vous parent célibataire ?
+                    </label>
+                    <div className="flex gap-4 mb-3">
+                      <label className="flex cursor-pointer items-center gap-2">
+                        <input
+                          type="radio"
+                          name="isSingleParent"
+                          checked={!isSingleParent}
+                          onChange={() => {
+                            setIsSingleParent(false);
+                            setChildrenCount('');
+                          }}
+                          className="h-4 w-4 border-white/20 bg-white/5 text-amber-500 focus:ring-amber-500/30"
+                        />
+                        <span className="text-sm text-zinc-300">Non</span>
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2">
+                        <input
+                          type="radio"
+                          name="isSingleParent"
+                          checked={isSingleParent}
+                          onChange={() => setIsSingleParent(true)}
+                          className="h-4 w-4 border-white/20 bg-white/5 text-amber-500 focus:ring-amber-500/30"
+                        />
+                        <span className="text-sm text-zinc-300">Oui</span>
+                      </label>
+                    </div>
+
+                    {isSingleParent && (
+                      <div className="animate-[fadeIn_0.3s_ease-out]">
+                        <label
+                          htmlFor="childrenCount"
+                          className="mb-1.5 block text-sm font-medium text-zinc-300"
+                        >
+                          Nombre d'enfants <span className="text-amber-500">*</span>
+                        </label>
+                        <select
+                          id="childrenCount"
+                          value={childrenCount}
+                          onChange={(e) => setChildrenCount(Number(e.target.value))}
+                          className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition-all duration-300 focus:border-amber-500 focus:bg-white/[0.07] focus:ring-1 focus:ring-amber-500/30"
+                        >
+                          <option value="" disabled className="text-zinc-500">Combien d'enfants avez-vous ?</option>
+                          {[1, 2, 3, 4, 5].map((num) => (
+                            <option key={num} value={num} className="bg-zinc-900 text-white">
+                              {num} {num === 1 ? 'enfant' : 'enfants'}{num === 5 ? ' et plus' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
 
                   {/* Rappel vérification identité */}

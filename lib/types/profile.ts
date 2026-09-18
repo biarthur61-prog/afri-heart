@@ -20,6 +20,9 @@ export interface Profile {
   id_document_verso_url?: string;       // URL Supabase Storage du Verso
   id_document_selfie_url?: string;      // URL Supabase Storage du Selfie
   id_document_status?: 'none' | 'pending' | 'verified' | 'rejected'; // Statut vérification
+  gender?: string;
+  is_single_parent?: boolean;
+  children_count?: number;
 }
 
 // Type pour la création d'un profil (sans les champs auto-générés)

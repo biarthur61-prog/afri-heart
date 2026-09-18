@@ -114,6 +114,9 @@ export default function DashboardPage() {
   const [editObjective, setEditObjective] = useState('');
   const [editSearchAgeRange, setEditSearchAgeRange] = useState('');
   const [editSearchLocation, setEditSearchLocation] = useState('');
+  const [editGender, setEditGender] = useState('');
+  const [editIsSingleParent, setEditIsSingleParent] = useState(false);
+  const [editChildrenCount, setEditChildrenCount] = useState<number | ''>('');
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileSaveSuccess, setProfileSaveSuccess] = useState(false);
   const [profileSaveError, setProfileSaveError] = useState('');
@@ -170,6 +173,9 @@ export default function DashboardPage() {
       setEditObjective(prof.objective || '');
       setEditSearchAgeRange(prof.search_age_range || '');
       setEditSearchLocation(prof.search_location || '');
+      setEditGender(prof.gender || '');
+      setEditIsSingleParent(prof.is_single_parent || false);
+      setEditChildrenCount(prof.children_count || '');
 
       // Fetch other users' profiles
       const { data: otherProfiles, error: otherProfilesError } = await supabase
@@ -401,6 +407,14 @@ export default function DashboardPage() {
         city: editCity.trim(),
         bio: editBio.trim(),
         phone_number: editPhone.trim(),
+        age: editAge === '' ? undefined : Number(editAge),
+        profession: editProfession.trim(),
+        objective: editObjective.trim(),
+        search_age_range: editSearchAgeRange.trim(),
+        search_location: editSearchLocation.trim(),
+        gender: editGender,
+        is_single_parent: editIsSingleParent,
+        children_count: editIsSingleParent ? (editChildrenCount || 0) : 0,
       };
       
       const { error: updateError } = await supabase
@@ -412,15 +426,7 @@ export default function DashboardPage() {
 
       setCurrentProfile({
         ...currentProfile,
-        full_name: editFullName.trim(),
-        city: editCity.trim(),
-        bio: editBio.trim(),
-        phone_number: editPhone.trim(),
-        age: editAge === '' ? undefined : Number(editAge),
-        profession: editProfession.trim(),
-        objective: editObjective.trim(),
-        search_age_range: editSearchAgeRange.trim(),
-        search_location: editSearchLocation.trim()
+        ...updatePayload
       });
       setProfileSaveSuccess(true);
     } catch (err: any) {
@@ -852,9 +858,15 @@ export default function DashboardPage() {
                             <h3 className="text-lg font-bold text-white flex items-center gap-1.5 drop-shadow-md">
                               {p.full_name.split(' ')[0]}, {p.age} ans
                             </h3>
-                            <span className="text-[10px] text-amber-300/90 font-medium tracking-wide uppercase drop-shadow-md">
+                            <span className="text-[10px] text-amber-300/90 font-medium tracking-wide uppercase drop-shadow-md block">
                               {p.objective}
                             </span>
+                            {p.is_single_parent && (
+                              <span className="text-[10px] text-rose-300/90 font-medium tracking-wide drop-shadow-md flex items-center gap-1 mt-0.5">
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-3.462-5.385A3.996 3.996 0 0114 15v3h2zM8 9.615A5.972 5.972 0 004.462 15v3h2v-3a3.996 3.996 0 011.538-3.385z" /></svg>
+                                {p.gender === 'male' ? 'Père célibataire' : p.gender === 'female' ? 'Mère célibataire' : 'Parent célibataire'} - {p.children_count} enfant{p.children_count && p.children_count > 1 ? 's' : ''}
+                              </span>
+                            )}
                           </div>
                         </div>
                         <div className="p-5 flex-1 flex flex-col justify-between bg-zinc-900/20">
@@ -1351,6 +1363,50 @@ export default function DashboardPage() {
                       <option value="Rencontre amicale">👋 Rencontre amicale</option>
                     </select>
                   </div>
+                  <div className="sm:col-span-2 space-y-1.5">
+                    <label className="text-xs font-semibold text-zinc-400 ml-1">Genre</label>
+                    <select
+                      value={editGender}
+                      onChange={(e) => setEditGender(e.target.value)}
+                      className="w-full bg-zinc-900/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-amber-500 focus:bg-zinc-900 transition-all hover:border-white/20"
+                    >
+                      <option value="">Sélectionnez votre genre</option>
+                      <option value="male">Homme</option>
+                      <option value="female">Femme</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-zinc-400 ml-1">Parent célibataire ?</label>
+                    <select
+                      value={editIsSingleParent ? 'yes' : 'no'}
+                      onChange={(e) => {
+                        const isSingle = e.target.value === 'yes';
+                        setEditIsSingleParent(isSingle);
+                        if (!isSingle) setEditChildrenCount('');
+                      }}
+                      className="w-full bg-zinc-900/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-amber-500 focus:bg-zinc-900 transition-all hover:border-white/20"
+                    >
+                      <option value="no">Non</option>
+                      <option value="yes">Oui</option>
+                    </select>
+                  </div>
+                  {editIsSingleParent && (
+                    <div className="space-y-1.5 animate-[fadeIn_0.3s_ease-out]">
+                      <label className="text-xs font-semibold text-zinc-400 ml-1">Nombre d'enfants</label>
+                      <select
+                        value={editChildrenCount}
+                        onChange={(e) => setEditChildrenCount(Number(e.target.value))}
+                        className="w-full bg-zinc-900/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-amber-500 focus:bg-zinc-900 transition-all hover:border-white/20"
+                      >
+                        <option value="" disabled>Combien d'enfants ?</option>
+                        {[1, 2, 3, 4, 5].map((num) => (
+                          <option key={num} value={num}>
+                            {num} {num === 1 ? 'enfant' : 'enfants'}{num === 5 ? ' et plus' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div className="sm:col-span-2 space-y-1.5">
                     <label className="text-xs font-semibold text-zinc-400 ml-1">À propos de moi</label>
                     <textarea
